@@ -16,6 +16,7 @@ hard-coded thresholds.
 ## Table of contents
 
 - [Architecture](#architecture)
+- [Proof it runs](#proof-it-runs)
 - [Quick start](#quick-start)
 - [API reference](#api-reference)
 - [Event detection design](#event-detection-design) ← the core
@@ -23,7 +24,13 @@ hard-coded thresholds.
 - [Technology choices](#technology-choices)
 - [Running the tests](#running-the-tests)
 - [Cursor setup](#cursor-setup) ← rules, agents, skills
+- [Cloud deployment & scaling](#cloud-deployment--scaling)
 - [Project layout](#project-layout)
+
+> **Companion docs:** **[ARCHITECTURE.md](ARCHITECTURE.md)** — the full set of
+> interactive UML/Mermaid diagrams (context, container, component, sequence, state,
+> ER, cloud, scaling). **[DECISIONS.md](DECISIONS.md)** — architecture decision
+> records with the alternatives rejected.
 
 ---
 
@@ -70,6 +77,10 @@ the only place that touches I/O and orchestration. This separation is what makes
 the detection logic exhaustively unit-testable and what lets the Cursor
 *replay-detection* skill re-run the exact same logic over historical data.
 
+> For the full set of diagrams — context, container, component, end-to-end
+> sequence, precipitation state machine, ER model, and cloud/scaling — see
+> **[ARCHITECTURE.md](ARCHITECTURE.md)** (rendered Mermaid, interactive on GitHub).
+
 ---
 
 ## Quick start
@@ -93,8 +104,44 @@ Then:
 - The database persists in the `pgdata` named volume across
   `docker compose down` / `up` (use `docker compose down -v` to wipe it).
 
-> If you already run Postgres locally on port 5432, change the host port in
-> `docker-compose.yml` (`5433:5432`) — the rest of the stack is unaffected.
+> The database port is **not** published to the host — the API on `:8000` is the
+> only exposed port, so the stack starts cleanly even on a machine already
+> running Postgres on 5432. (To reach the DB directly from the host, add a
+> mapping in `docker-compose.yml`, e.g. `ports: ["5433:5432"]`.)
+
+---
+
+## Proof it runs
+
+Captured from a live `docker compose up --build` (database seeded with the
+reproducible sample dataset via `docker compose exec api python
+scripts/generate_demo_data.py --reset`):
+
+```text
+$ docker compose ps
+SERVICE   STATUS                   PORTS
+api       Up (healthy)             0.0.0.0:8000->8000/tcp
+db        Up (healthy)             5432/tcp          # internal only, not published
+poller    Up                       8000/tcp
+
+$ curl -s http://localhost:8000/health
+{"status":"ok","readings_stored":216,"events_stored":43}
+
+$ curl -s "http://localhost:8000/events?city=Ottawa&limit=1"
+{"events":[{"city":"Ottawa","event_type":"rapid_change","field":"wind_speed_10m",
+"severity":"severe","observed_value":16.4,"baseline_value":65.1,"deviation":-48.7,
+"reason":"Wind speed fell 48.7 km/h in Ottawa since the previous reading (65.1 → 16.4 km/h).",
+"...":"..."}]}
+```
+
+Screenshots of the stack and the interactive Swagger UI:
+
+| Docker Desktop — stack running | Swagger UI (`/docs`) | `/events` response |
+|---|---|---|
+| ![Docker Desktop showing watchagent api, db, poller](docs/screenshots/docker-desktop.png) | ![Swagger UI at /docs](docs/screenshots/swagger-docs.png) | ![Sample /events JSON](docs/screenshots/events-response.png) |
+
+> Drop the three PNGs into [`docs/screenshots/`](docs/screenshots/) (see that
+> folder's README for exactly what to capture) and they render here.
 
 ---
 
@@ -400,6 +447,36 @@ python .cursor/skills/data-analysis/scripts/analyze.py overview
 
 ---
 
+## Cloud deployment & scaling
+
+The container-per-role design maps directly onto managed services. Full diagrams
+(AWS deployment + scaling topology) are in
+**[ARCHITECTURE.md §9–10](ARCHITECTURE.md#9-cloud-deployment-aws)**; the summary:
+
+**Deploy (AWS).** Same image, unchanged. GitHub Actions builds and pushes to
+**ECR**; the `api` and `poller` run as two **ECS Fargate** services; an **ALB +
+ACM** terminates TLS and health-checks `/health`; data lives in **RDS for
+PostgreSQL** (Multi-AZ); `DATABASE_URL` comes from **Secrets Manager**; the JSON
+logs flow into **CloudWatch** with alarms on poll success rate; infra is
+**Terraform**. A serverless variant runs the poller on an **EventBridge
+Scheduler + Lambda** and the API on **Lambda + API Gateway** over **Aurora
+Serverless v2**. (GCP equivalent: Cloud Run + Cloud Run Job/Scheduler + Cloud SQL.)
+
+**Scale (from 3 cities to thousands of stations).**
+- **Ingestion:** swap the single loop for a **work queue (SQS)** drained by a
+  pool of stateless poller workers — the `UNIQUE(city, timestamp)` dedup makes
+  redelivery safe, so workers need no coordination.
+- **Storage:** **TimescaleDB** hypertables + continuous aggregates to precompute
+  rolling baselines, **read replicas** for the API, retention/downsampling.
+- **Detection:** move per-reading Python into a **stream processor** (Kafka +
+  Flink) keeping incremental per-station baselines; the detectors stay pure.
+- **Serving:** the API is stateless → autoscale behind the ALB, with a **Redis**
+  cache for hot queries.
+- **Resilience/observability:** circuit breaker + DLQ around the upstream;
+  Prometheus/Grafana + OpenTelemetry; alert when the monitor goes *silent*.
+
+---
+
 ## Project layout
 
 ```
@@ -421,10 +498,12 @@ watchagent/
 │       └── detector.py    # orchestrator + cooldown
 ├── tests/                 # dedup, detection, API, weather-client
 ├── scripts/               # generate_demo_data.py (reproducible sample dataset)
+├── docs/screenshots/      # proof images referenced by the README
 ├── .cursor/               # rules, agents, skills (graded)
 ├── .github/workflows/ci.yml
 ├── Dockerfile
 ├── docker-compose.yml
+├── ARCHITECTURE.md        # full diagram set (context → sequence → ER → cloud → scaling)
 ├── DECISIONS.md           # architecture decision records
 └── .env.example
 ```
