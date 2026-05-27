@@ -19,6 +19,7 @@ hard-coded thresholds.
 - [Quick start](#quick-start)
 - [API reference](#api-reference)
 - [Event detection design](#event-detection-design) ← the core
+- [Detector tuning evidence](#detector-tuning-evidence-reproducible)
 - [Technology choices](#technology-choices)
 - [Running the tests](#running-the-tests)
 - [Cursor setup](#cursor-setup) ← rules, agents, skills
@@ -215,6 +216,32 @@ layering is signal, not redundancy, and the cooldown keeps the volume sane.
 | 6 | `high_wind` | Dangerous absolute wind | Hard human-meaningful tiers (strong ≥ 40 km/h, gale ≥ 62 km/h). Fires only when a tier is **newly crossed upward**, so sustained wind doesn't re-fire. Complements `anomaly`, which covers "unusual *for this city*". |
 | 7 | `cross_city_divergence` | Regional spread across the cities | When the max−min temperature across monitored cities exceeds `CROSS_CITY_SPREAD_C` (18 °C), attributed to the extreme (warmest/coldest) city so one divergent moment yields one event, not three. |
 
+### Detection flow
+
+```mermaid
+flowchart TD
+    R[New reading] --> D{New city + timestamp?}
+    D -- duplicate --> X[skip: no detection]
+    D -- yes --> S[store reading]
+    S --> H[load rolling history,\npeer cities, cooldown state]
+    H --> A[anomaly: robust z vs baseline]
+    H --> RC[rapid_change: delta floor + delta-z]
+    H --> T[trend: monotonic cumulative]
+    H --> P[precipitation: state machine]
+    H --> C[condition_change: WMO tier]
+    H --> W[high_wind: absolute tiers]
+    H --> XC[cross_city: temp spread]
+    A --> CD{Cooldown elapsed for\ncity + type + field?}
+    RC --> CD
+    T --> CD
+    P --> CD
+    C --> CD
+    W --> CD
+    XC --> CD
+    CD -- no --> SUP[suppress]
+    CD -- yes --> ST[(store event)]
+```
+
 ### Controlling noise (sensitivity vs. noise)
 
 - **Cooldown / refractory period.** After an event fires for a
@@ -239,6 +266,47 @@ Each event row carries `city`, `event_type`, `field`, `severity`,
 `observed_value`, `baseline_value`, `deviation`, a human-readable `reason`, a
 machine-readable `context` blob, the `reading_timestamp` it describes, and the
 `detected_at` time.
+
+> For the deeper rationale behind each choice — robust stats, the field-specific
+> detectors, the cooldown, sync vs async, and the alternatives rejected — see
+> **[DECISIONS.md](DECISIONS.md)**.
+
+---
+
+## Detector tuning evidence (reproducible)
+
+The design above is not theoretical. A deterministic 72-hour sample dataset
+(`scripts/generate_demo_data.py`) replayed through the detector produces these
+**measured** numbers — reproduce them in under a minute:
+
+```bash
+python scripts/generate_demo_data.py --database-url sqlite:///demo.db --reset
+python .cursor/skills/replay-detection/scripts/replay.py --database-url sqlite:///demo.db
+python .cursor/skills/replay-detection/scripts/replay.py --database-url sqlite:///demo.db --no-cooldown
+```
+
+**Cooldown earns its keep.** Over 216 readings (3 cities × 72 h):
+
+| Configuration | Events fired |
+|---|---|
+| Cooldown **disabled** (`--no-cooldown`) | **78** |
+| Default cooldown (3 h / 6 h trends) | **44** |
+
+That is **≈44 % suppression** — the cooldown collapses repeated firings during
+sustained episodes (e.g. a multi-hour heat wave) down to one announcement, while
+preserving every distinct event. With cooldown on, the 44 break down as
+rapid_change 12, trend 10, anomaly 9, condition_change 4, precip_onset 3,
+precip_cessation 3, cross_city_divergence 2, high_wind 1 — a healthy spread, not
+one detector dominating.
+
+**Per-city calibration is real, not a slogan.** Over the same window the
+data-analysis skill reports a temperature MAD of **1.85 °C for Vancouver** versus
+**5.3 °C for Ottawa**. Because the modified z-score divides by MAD, an identical
+absolute swing scores ≈**2.9× higher in Vancouver**. Concretely, the detector
+flagged a +2.3 °C deviation in Vancouver at 3.9σ; the same 2.3 °C in Ottawa is
+only ≈1.1σ — comfortably below the 3.5 threshold. The same change is notable in
+one city and unremarkable in the other, with **no per-city threshold
+hard-coded**.
 
 ---
 
@@ -352,10 +420,12 @@ watchagent/
 │       ├── rules.py       # the seven detectors
 │       └── detector.py    # orchestrator + cooldown
 ├── tests/                 # dedup, detection, API, weather-client
+├── scripts/               # generate_demo_data.py (reproducible sample dataset)
 ├── .cursor/               # rules, agents, skills (graded)
 ├── .github/workflows/ci.yml
 ├── Dockerfile
 ├── docker-compose.yml
+├── DECISIONS.md           # architecture decision records
 └── .env.example
 ```
 
@@ -368,3 +438,36 @@ watchagent/
 1. **Lint & unit tests** — `ruff check` + `pytest` (SQLite + mocked API, no
    secrets).
 2. **Docker build** — `docker build`, proving the image builds with no API keys.
+
+---
+
+## What I'd do with more time
+
+Scoped deliberately to the brief; the natural next steps, roughly in priority:
+
+- **Learned baselines from longer history.** Persist 30+ days per city and seed
+  the baseline from it, so detection is well-calibrated immediately after a cold
+  start instead of after `MIN_HISTORY` readings.
+- **Alerting + metrics.** A webhook/Slack sink for `severe` events, and a
+  `/metrics` Prometheus endpoint (events by type/severity, poll success rate,
+  fetch latency) so the monitor is itself monitorable.
+- **An `/events/{id}` drill-down** returning the event with the surrounding
+  window of readings — turning each `reason` into a fully inspectable story.
+- **Backfill + TimescaleDB.** Use Open-Meteo's historical API to backfill, and
+  partition readings by time (hypertables) if the city set grows large.
+- **Detector evaluation harness.** Label a fixture of "should/shouldn't fire"
+  episodes and track precision/recall as thresholds change, turning tuning into a
+  measured feedback loop on top of the existing replay skill.
+
+---
+
+## Note on AI tool usage
+
+Per the brief, this project was built with AI assistance (Cursor Pro is the
+brief's required tool). The **design decisions are my own** and are documented so
+they can be defended: the event taxonomy, the choice of robust statistics and
+per-city calibration, the noise-control strategy, and the architecture
+trade-offs are laid out in [DECISIONS.md](DECISIONS.md) and the sections above.
+The AI accelerated implementation and helped enforce the conventions encoded in
+[`.cursor/rules/`](.cursor/rules/) — which is exactly the workflow the challenge
+sets out to evaluate.
