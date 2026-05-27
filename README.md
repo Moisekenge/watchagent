@@ -22,6 +22,7 @@ hard-coded thresholds.
 - [Architecture](#architecture)
 - [Proof it runs](#proof-it-runs)
 - [Quick start](#quick-start)
+- [Running & testing locally](#running--testing-locally)
 - [API reference](#api-reference)
 - [Event detection design](#event-detection-design) ← the core
 - [Detector tuning evidence](#detector-tuning-evidence-reproducible)
@@ -112,6 +113,73 @@ Then:
 > only exposed port, so the stack starts cleanly even on a machine already
 > running Postgres on 5432. (To reach the DB directly from the host, add a
 > mapping in `docker-compose.yml`, e.g. `ports: ["5433:5432"]`.)
+
+---
+
+## Running & testing locally
+
+### 1. Start it
+```bash
+cp .env.example .env
+docker compose up --build -d        # or: make up
+```
+The API comes up at **http://localhost:8000** and the poller starts collecting
+immediately. Optionally load a rich sample dataset so events show up right away
+(otherwise events accrue as live readings arrive hourly):
+```bash
+docker compose exec api python scripts/generate_demo_data.py --reset   # or: make seed
+```
+
+> **Open the URLs in a real browser (Chrome / Firefox / Edge).** An editor's
+> built-in preview pane (e.g. Cursor's) may not render raw JSON — that does *not*
+> mean the endpoint is empty.
+
+### 2. Open it (browser)
+| What | URL |
+|------|-----|
+| **Swagger UI** (interactive — click *Try it out*) | <http://localhost:8000/docs> |
+| Health | <http://localhost:8000/health> |
+| Readings | <http://localhost:8000/readings?limit=10> |
+| Events | <http://localhost:8000/events?limit=10> |
+| Events for one city | <http://localhost:8000/events?city=Ottawa> |
+
+### 3. Hit it from the terminal
+```bash
+curl http://localhost:8000/health
+curl "http://localhost:8000/readings?city=Vancouver&limit=5"
+curl "http://localhost:8000/events?city=Ottawa&limit=5"
+```
+
+### 4. Query the collected data (the Cursor skills)
+```bash
+docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py overview
+docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py compare --hours 300
+docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py events --severity severe
+docker compose exec api python .cursor/skills/replay-detection/scripts/replay.py
+docker compose exec api python .cursor/skills/dedup-audit/scripts/audit.py
+```
+
+### 5. Run the unit tests
+```bash
+pip install -r requirements-dev.txt
+pytest -q                       # or: make test   → 29 tests
+ruff check app tests scripts    # or: make lint
+```
+
+### 6. Lifecycle
+```bash
+docker compose ps               # service status
+docker compose logs -f poller   # watch it collect (Ctrl+C to stop following)
+docker compose down             # stop, keep the database
+docker compose down -v          # stop and wipe the database volume
+```
+
+### Where the diagrams live
+All ten architecture diagrams are in **[ARCHITECTURE.md](ARCHITECTURE.md)**. They
+are [Mermaid](https://mermaid.js.org/) and render **automatically on GitHub**. In
+a local editor they show as ```` ```mermaid ```` code blocks unless you install a
+Mermaid preview extension — or paste any block into <https://mermaid.live> to view
+it interactively.
 
 ---
 
