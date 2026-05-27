@@ -1,0 +1,5 @@
+# Development / CI dependencies. Installed on top of requirements.txt.
+-r requirements.txt
+pytest>=9.0,<10.0
+pytest-cov>=7.0,<8.0
+ruff>=0.15,<1.0

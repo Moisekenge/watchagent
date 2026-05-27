@@ -1,0 +1,29 @@
+---
+description: Storage, session, and deduplication conventions for the data layer.
+globs: app/repository.py,app/models.py,app/db.py
+alwaysApply: false
+---
+
+# Storage & deduplication
+
+## Deduplication is non-negotiable
+- A reading is unique by **`(city, timestamp)`**. This is enforced two ways and
+  both must stay in place: the `UniqueConstraint("city", "timestamp")` on the
+  `Reading` model, **and** the pre-insert lookup in `store_reading`.
+- `store_reading` returns `(row, created: bool)`. Callers must treat
+  `created is False` as "already had it" and skip detection/event storage.
+
+## Sessions are injected, never global
+- Every repository function takes an explicit `Session` argument. Do not reach
+  for a module-level session or open one inside the data layer.
+- Writers use `session_scope()` (commit/rollback handled); the API uses the
+  `get_session` dependency for reads.
+
+## Keep the schema database-agnostic
+- Use generic SQLAlchemy column types and the generic `JSON` type. **No
+  Postgres-only types or raw Postgres SQL** — the test suite runs these exact
+  models on SQLite, which is what lets CI test without a database service.
+- Store all datetimes timezone-aware in **UTC**.
+- Conversions between ORM rows and the `ReadingData`/`EventData` dataclasses live
+  here (`to_reading_data`, the `store_events` mapping) so upper layers never
+  import SQLAlchemy.

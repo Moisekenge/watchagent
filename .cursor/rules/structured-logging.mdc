@@ -1,0 +1,25 @@
+---
+description: Structured JSON logging conventions used everywhere in the service.
+globs:
+alwaysApply: true
+---
+
+# Structured logging
+
+Logs are single-line JSON on stdout (see `app/logging_config.py`). Keep them
+machine-parseable and groupable.
+
+- **Never use `print()`** for diagnostics. Get a logger with
+  `logging.getLogger("watchagent.<component>")` (e.g. `watchagent.poller`).
+- The log **message is a short static string**. All dynamic values go through
+  the standard `extra={...}` kwarg, which the JSON formatter merges into the
+  payload. Do **not** f-string dynamic values into the message — static messages
+  group cleanly in log tooling.
+  - Good: `logger.warning("weather fetch failed", extra={"city": city.name, "http_status": 503})`
+  - Bad:  `logger.warning(f"weather fetch failed for {city.name} 503")`
+- Context keys to include when relevant: `city` on any per-city log;
+  `http_status` and `attempt` on fetch failures; `timestamp` (ISO-8601) on
+  reading-level logs; `event_types` on detection logs.
+- Level discipline: `DEBUG` = dedup skips / fine detail; `INFO` = lifecycle,
+  stored reading, cycle summary; `WARNING` = recoverable problems (fetch failed,
+  city skipped); `ERROR`/`logger.exception` = genuinely unexpected failures only.

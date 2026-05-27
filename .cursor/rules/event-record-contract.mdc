@@ -1,0 +1,40 @@
+---
+description: The shape of an event record and the purity contract for detectors. Apply when adding or changing event detection logic.
+globs: app/detection/**,app/domain.py
+alwaysApply: false
+---
+
+# Event record & detector contract
+
+## Every `EventData` must answer what / where / when / why
+Required on every event:
+- `city` (where), `event_type` (an `EventType` enum member), `field`,
+  `severity` (a `Severity` enum member), `reading_timestamp` (when), and a
+  human-readable `reason` that names the city and the magnitude in words.
+
+Statistical events (anomaly, rapid_change, trend, cross_city_divergence) must
+also set `observed_value`, `baseline_value`, and `deviation` (the z-score,
+delta, or spread). Any extra machine-readable justification goes in `context`
+(e.g. `mad`, `window`, `from_tier`/`to_tier`, peer temps). Never invent an event
+without a numeric or categorical justification stored alongside it.
+
+## Detectors are pure functions
+- Signature is `(reading, history, config) -> list[EventData]`
+  (cross-city additionally takes `peers`). **No database access. No
+  `datetime.now()`** — the detection time is injected via `detect_events(now=...)`.
+- `history` is the city's prior readings, **oldest → newest, excluding** the new
+  reading.
+- Statistical detectors must honour `config.min_history` (silent during cold
+  start) and use the **robust** `modified_zscore` (median/MAD) — never mean/std,
+  because the outlier we are detecting would contaminate mean/std.
+
+## Severity
+Only `info`, `notable`, `severe`. Pick by magnitude (|z|, WMO tier, delta size),
+not by event type.
+
+## Adding a new event type
+1. Add it to the `EventType` enum.
+2. If it should fire on a different cadence, give it a branch in
+   `_cooldown_hours`.
+3. Add a unit test that asserts both that it **fires** on a constructed
+   triggering sequence and that it **does not fire** on a near-miss sequence.

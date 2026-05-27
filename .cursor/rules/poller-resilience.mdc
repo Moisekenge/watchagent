@@ -1,0 +1,31 @@
+---
+description: Failure-handling and lifecycle contract for the poller and weather client. Apply when editing polling, fetching, or retry logic.
+globs: app/poller.py,app/weather_client.py
+alwaysApply: false
+---
+
+# Poller resilience contract
+
+The poller is a long-running process. A transient upstream failure or one bad
+city must never stop collection. Follow these rules exactly.
+
+## Fetching (`app/weather_client.py`)
+- Retry a failed fetch up to `settings.max_retries` times with **linear backoff**
+  (`backoff_seconds * attempt`).
+- Log **every failed attempt at WARNING** with, at minimum: `city`,
+  `http_status` (when an HTTP status exists), `attempt`, and `max_retries`.
+  Use the `extra=` kwarg — never f-string these values into the message.
+- After retries are exhausted, raise `WeatherAPIError(city, message, status, attempts)`.
+  Do not return partial or `None` readings.
+
+## Polling loop (`app/poller.py`)
+- The network fetch (`client.fetch_current`) MUST happen **outside** any
+  `session_scope()` block. Never hold a DB transaction open across network I/O.
+- `run_cycle` MUST contain per-city failures: catch `WeatherAPIError`
+  (log WARNING with `city`, `http_status`, `attempts`, then continue) and catch
+  any other `Exception` (`logger.exception(...)`, then continue). One city
+  failing never aborts the others or the loop.
+- Only run detection and store events when `store_reading` returns
+  `created is True`. A duplicate reading produces no events.
+- Honour `SIGTERM`/`SIGINT`: set the `_stop` flag and use `_interruptible_sleep`
+  so the container shuts down promptly and cleanly.

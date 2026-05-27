@@ -1,0 +1,22 @@
+[project]
+name = "watchagent"
+version = "1.0.0"
+description = "Weather monitor and notable-event detector for three Canadian cities."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+# Make the repo root importable so `import app...` works without installing.
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# A pragmatic, non-pedantic set: pyflakes, pycodestyle, isort, bugbear, comprehensions.
+select = ["E", "F", "I", "B", "C4", "UP"]
+# E501: long log strings are fine. UP017: `timezone.utc` is explicit and avoids
+# the `datetime.UTC` (3.11+) class/module import ambiguity in our import style.
+ignore = ["E501", "UP017"]

@@ -1,0 +1,29 @@
+---
+description: How tests must be written — no network, deterministic detection tests, SQLite for storage/API.
+globs: tests/**
+alwaysApply: false
+---
+
+# Testing conventions
+
+## Never hit the network
+Any code path that would call Open-Meteo MUST be mocked. Inject a fake client or
+monkeypatch `WeatherClient.fetch_current` / use `httpx.MockTransport`. A test
+that makes a real HTTP request is a bug — CI runs with no internet guarantees
+and the grader's build runs without API keys.
+
+## Detection tests are the most important tests
+- Construct an explicit list of `ReadingData` by hand (the "controlled sequence").
+- Call `detect_events(reading, history, peers, last_event_at, config, now=...)`
+  with an **injected `now`** and an explicit `DetectionConfig` so results are
+  deterministic.
+- Assert **both** directions: the events you expect *do* fire, and the
+  near-miss cases you expect *do not*. A detection test that only checks the
+  positive case is incomplete — it cannot catch an over-firing regression.
+- When you change a threshold or add a detector, update/extend these tests in
+  the same change.
+
+## Storage & API tests
+- Use the in-memory SQLite engine fixture; never require a running Postgres.
+- Seed data through the repository functions, then assert on the public API
+  response *shape* (keys present, ordering, filters) — not on incidental values.
