@@ -26,6 +26,7 @@ hard-coded thresholds.
 | **CI workflow file** | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 | **Architecture & all diagrams** | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | **Design decisions (ADRs)** | [DECISIONS.md](DECISIONS.md) |
+| **Handover / operations guide** | [HANDOVER.md](HANDOVER.md) |
 | **Cursor setup (graded)** | [rules](.cursor/rules/) · [agents](.cursor/agents/) · [skills](.cursor/skills/) |
 | **API docs (when running)** | <http://localhost:8000/docs> |
 | **License** | [MIT](LICENSE) |
@@ -52,7 +53,9 @@ hard-coded thresholds.
 > **Companion docs:** **[ARCHITECTURE.md](ARCHITECTURE.md)** — the full set of
 > interactive UML/Mermaid diagrams (context, container, component, sequence, state,
 > ER, cloud, scaling). **[DECISIONS.md](DECISIONS.md)** — architecture decision
-> records with the alternatives rejected.
+> records with the alternatives rejected. **[HANDOVER.md](HANDOVER.md)** — the
+> operations guide: run paths (terminal & AI agent), runbook, troubleshooting,
+> and how to extend each part.
 
 ---
 
@@ -128,6 +131,39 @@ python scripts/generate_demo_data.py --database-url sqlite:///demo.db --reset
 python .cursor/skills/data-analysis/scripts/analyze.py overview --database-url sqlite:///demo.db
 python .cursor/skills/replay-detection/scripts/replay.py --database-url sqlite:///demo.db
 ```
+
+### Option C — drive it with an AI agent (Cursor / Claude Code)
+
+This project ships a complete Cursor environment, so an AI coding agent can run
+and explore it for you. Open the repo in **Cursor** (or **Claude Code** /
+Copilot agent mode) and give it plain-language instructions — it executes the
+same terminal commands above and reads the skill output back to you. Each skill
+has a `SKILL.md` describing when and how to invoke it, so the agent can pick the
+right one on its own.
+
+Example prompts you can give the agent:
+
+```text
+Start the stack with docker compose, wait for /health to return ok, then seed
+the demo dataset and tell me how many events of each type fired.
+
+Run the data-analysis skill and compare the three cities over the last 24 hours.
+Which city is warmest right now and what's the spread?
+
+Replay the stored readings through the detector with and without the cooldown,
+and explain how much noise the cooldown suppresses.
+
+Run the dedup-audit skill and confirm there are no duplicate (city, timestamp)
+rows or collection gaps.
+```
+
+The two scoped reviewer agents under [`.cursor/agents/`](.cursor/agents/) are for
+*reviewing code* (see [Cursor setup ▸ Agents](#agents--cursoragents)); the prompts
+above are for the everyday agent simply operating the stack and the skills.
+
+> Operating, maintaining, or extending this beyond a quick look? See the
+> **[handover guide](HANDOVER.md)** — run paths (terminal & AI agent),
+> operations, troubleshooting, and where to extend each part.
 
 ### Where the thinking lives (what to read, in order)
 
@@ -751,6 +787,7 @@ watchagent/
 ├── docker-compose.yml
 ├── ARCHITECTURE.md        # full diagram set (context → sequence → ER → cloud → scaling)
 ├── DECISIONS.md           # architecture decision records
+├── HANDOVER.md            # operations guide: run, runbook, troubleshooting, extending
 └── .env.example
 ```
 
