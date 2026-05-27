@@ -13,10 +13,12 @@ WORKDIR /code
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Application code, plus the Cursor skills so they can run via
-# `docker compose exec api python .cursor/skills/.../*.py`.
+# Application code, the Cursor skills, and the demo-data generator so they can
+# run via `docker compose exec api python .cursor/skills/.../*.py` (and
+# `... python scripts/generate_demo_data.py`).
 COPY app ./app
 COPY .cursor ./.cursor
+COPY scripts ./scripts
 
 # Run as a non-root user.
 RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /code

@@ -11,10 +11,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      # Published so the data-analysis skill can be run from the host. If you
-      # already run Postgres locally on 5432, change the host side (e.g. 5433:5432).
-      - "5432:5432"
+    # The DB port is intentionally NOT published to the host: the API (port 8000)
+    # is the only public interface, and publishing 5432 would clash on any machine
+    # already running Postgres there. Run the analysis skills inside the stack
+    # (`docker compose exec api python .cursor/skills/.../*.py`). To reach the DB
+    # from the host, add a mapping, e.g.  ports: ["5433:5432"].
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
