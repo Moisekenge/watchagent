@@ -60,21 +60,29 @@ CITY_CLIMATE = {
 }
 
 
-def _diurnal(mean: float, amp: float, hour_of_day: int, rng: random.Random) -> float:
-    # Coldest ~5am, warmest ~3pm.
-    base = mean + amp * math.sin(2 * math.pi * (hour_of_day - 9) / 24.0)
+def _diurnal(mean: float, amp: float, hour_index: int, rng: random.Random) -> float:
+    # A synthetic 24-hour cycle keyed to the reading's hour *offset* (not the
+    # wall-clock hour) so the generated values depend only on the offset and the
+    # seed — reproducible regardless of when the script runs.
+    base = mean + amp * math.sin(2 * math.pi * (hour_index - 9) / 24.0)
     return base + rng.gauss(0, 0.7)
 
 
 def generate(hours: int, seed: int) -> dict[str, list[ReadingData]]:
     rng = random.Random(seed)
-    start = datetime(2026, 5, 18, 0, 0, tzinfo=timezone.utc)
+    # Anchor the series to end at the current hour so the most recent reading is
+    # ~now. This lets the data-analysis skill's time-windowed commands (compare,
+    # city, trend) capture the data with their default windows, while the diurnal
+    # model (keyed to the hour offset, see _diurnal) keeps every value — and thus
+    # every detected event and statistic — reproducible across runs.
+    end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    start = end - timedelta(hours=hours - 1)
     out: dict[str, list[ReadingData]] = {c: [] for c in CITY_CLIMATE}
 
     for city, (mean, amp) in CITY_CLIMATE.items():
         for h in range(hours):
             ts = start + timedelta(hours=h)
-            temp = _diurnal(mean, amp, ts.hour, rng)
+            temp = _diurnal(mean, amp, h, rng)
             precip, wind, code = 0.0, rng.uniform(5, 18), 0
 
             # --- injected episodes (deterministic) -------------------------

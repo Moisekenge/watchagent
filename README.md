@@ -402,7 +402,14 @@ The design above is not theoretical. A deterministic 72-hour sample dataset
 python scripts/generate_demo_data.py --database-url sqlite:///demo.db --reset
 python .cursor/skills/replay-detection/scripts/replay.py --database-url sqlite:///demo.db
 python .cursor/skills/replay-detection/scripts/replay.py --database-url sqlite:///demo.db --no-cooldown
+# per-city calibration figures below:
+python .cursor/skills/data-analysis/scripts/analyze.py city Vancouver --hours 72 --database-url sqlite:///demo.db
+python .cursor/skills/data-analysis/scripts/analyze.py city Ottawa --hours 72 --database-url sqlite:///demo.db
 ```
+
+The generated series is anchored to end at the current hour (with reproducible
+values keyed to the hour offset), so the time-windowed analysis commands above
+work against it with their default windows.
 
 **Cooldown earns its keep.** Over 216 readings (3 cities × 72 h):
 
@@ -418,9 +425,9 @@ rapid_change 12, trend 10, anomaly 9, condition_change 4, precip_onset 3,
 precip_cessation 3, cross_city_divergence 2, high_wind 1 — a healthy spread, not
 one detector dominating.
 
-**Per-city calibration is real, not a slogan.** Over the same window the
-data-analysis skill reports a temperature MAD of **1.85 °C for Vancouver** versus
-**5.3 °C for Ottawa**. Because the modified z-score divides by MAD, an identical
+**Per-city calibration is real, not a slogan.** Over the same 72-hour window
+(`city <Name> --hours 72`) the data-analysis skill reports a temperature MAD of
+**1.85 °C for Vancouver** versus **5.3 °C for Ottawa**. Because the modified z-score divides by MAD, an identical
 absolute swing scores ≈**2.9× higher in Vancouver**. Concretely, the detector
 flagged a +2.3 °C deviation in Vancouver at 3.9σ; the same 2.3 °C in Ottawa is
 only ≈1.1σ — comfortably below the 3.5 threshold. The same change is notable in
