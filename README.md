@@ -17,8 +17,25 @@ hard-coded thresholds.
 
 ---
 
+## Quick links
+
+| Resource | Link |
+|---|---|
+| **Repository** | <https://github.com/Moisekenge/watchagent> |
+| **CI — live status & run history** | [GitHub Actions ▸ CI](https://github.com/Moisekenge/watchagent/actions/workflows/ci.yml) |
+| **CI workflow file** | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
+| **Architecture & all diagrams** | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| **Design decisions (ADRs)** | [DECISIONS.md](DECISIONS.md) |
+| **Cursor setup (graded)** | [rules](.cursor/rules/) · [agents](.cursor/agents/) · [skills](.cursor/skills/) |
+| **API docs (when running)** | <http://localhost:8000/docs> |
+| **License** | [MIT](LICENSE) |
+
+---
+
 ## Table of contents
 
+- [Quick links](#quick-links)
+- [For reviewers — step-by-step](#for-reviewers--step-by-step) ← start here
 - [Architecture](#architecture)
 - [Proof it runs](#proof-it-runs)
 - [Quick start](#quick-start)
@@ -36,6 +53,93 @@ hard-coded thresholds.
 > interactive UML/Mermaid diagrams (context, container, component, sequence, state,
 > ER, cloud, scaling). **[DECISIONS.md](DECISIONS.md)** — architecture decision
 > records with the alternatives rejected.
+
+---
+
+## For reviewers — step-by-step
+
+A guided path from a clean clone to "I've watched every deliverable run." Pick
+**Option A** (Docker, exactly as the brief specifies) or **Option B** (no Docker
+— just tests and skills in a virtualenv). Both take a few minutes.
+
+### Option A — the full stack with Docker (matches the brief)
+
+```bash
+# 1. Clone and start everything: API + poller + Postgres
+git clone https://github.com/Moisekenge/watchagent.git
+cd watchagent
+cp .env.example .env                 # local dev defaults — no real secrets
+docker compose up --build            # API comes up on http://localhost:8000
+```
+
+```bash
+# 2. Confirm the service is alive (in a second terminal)
+curl http://localhost:8000/health
+# → {"status":"ok","readings_stored":<int>,"events_stored":<int>}
+# …or open the interactive Swagger docs:  http://localhost:8000/docs
+```
+
+```bash
+# 3. Look at what the live poller has collected.
+#    (Open-Meteo only refreshes hourly, so events are sparse at first —
+#     jump to step 4 to see the detection engine light up immediately.)
+curl "http://localhost:8000/readings?limit=5"
+curl "http://localhost:8000/events?city=Ottawa&limit=5"
+```
+
+```bash
+# 4. Seed the reproducible 72-hour sample dataset straight into the running
+#    database, then re-check the API — now there are events of every type.
+docker compose exec api python scripts/generate_demo_data.py --reset
+curl "http://localhost:8000/events?limit=10"
+```
+
+```bash
+# 5. Interrogate the dataset with the graded Cursor skills (run INSIDE the
+#    stack so they reach Postgres over Compose's network — no host ports needed)
+docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py overview
+docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py compare
+docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py city Vancouver
+docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py events --severity severe
+docker compose exec api python .cursor/skills/replay-detection/scripts/replay.py
+docker compose exec api python .cursor/skills/dedup-audit/scripts/audit.py
+```
+
+```bash
+# 6. (Optional) prove persistence: the DB survives a restart
+docker compose restart            # readings_stored is unchanged afterwards
+```
+
+### Option B — no Docker (tests + skills in a virtualenv)
+
+```bash
+git clone https://github.com/Moisekenge/watchagent.git
+cd watchagent
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt
+
+# Run the test suite — mocks every weather call, uses in-memory SQLite
+pytest -q                          # 29 tests, no network, no DB service
+ruff check app tests
+
+# Seed a local SQLite dataset and drive the skills against it
+python scripts/generate_demo_data.py --database-url sqlite:///demo.db --reset
+python .cursor/skills/data-analysis/scripts/analyze.py overview --database-url sqlite:///demo.db
+python .cursor/skills/replay-detection/scripts/replay.py --database-url sqlite:///demo.db
+```
+
+### Where the thinking lives (what to read, in order)
+
+1. **The core reasoning** → [Event detection design](#event-detection-design) and
+   the reproducible [tuning evidence](#detector-tuning-evidence-reproducible).
+2. **The detectors themselves** → [`app/detection/rules.py`](app/detection/rules.py)
+   (seven detectors) and [`app/detection/baselines.py`](app/detection/baselines.py)
+   (robust median/MAD statistics).
+3. **Why each threshold** → [DECISIONS.md](DECISIONS.md) (ADRs with rejected
+   alternatives).
+4. **The Cursor environment (graded)** → [Cursor setup](#cursor-setup) — rules,
+   the two scoped agents, and the skills.
 
 ---
 
@@ -492,10 +596,73 @@ decision here:
 
 ### Agents — [`.cursor/agents/`](.cursor/agents/)
 
-| Agent | Scope |
-|-------|-------|
-| `event-detection-reviewer` | Reviews/authors logic under `app/detection/`. Knows the seven detectors, the robust-stats rationale, the purity contract, and the noise budget; its checklist covers purity, cold-start, false-positive risk, justification completeness, and fire/no-fire test coverage. Read-only and explicitly out of scope for the poller, API, and schema. |
-| `data-layer-reviewer` | Reviews `app/repository.py`, `app/models.py`, `app/db.py` for query correctness, the dedup guarantee, session hygiene, and — critically — **SQLite/Postgres portability** (so a change that works on Postgres can't silently break CI's SQLite tests). |
+Two **scoped, read-only reviewer agents**, each pinned to one slice of the
+codebase. They are deliberately *narrow*: each knows its own area deeply and
+refuses to comment outside it, so their feedback never overlaps or contradicts.
+
+**How a Cursor agent is built** — each is a Markdown file with YAML frontmatter
+(`name`, `description`, `model`, `readonly`) followed by a **system prompt**: the
+standing instructions the agent runs under *every* time it is invoked. Both
+agents use `model: inherit` (they run on whatever model the session uses) and
+`readonly: true` (they review and advise — they never edit files). The
+`description` is what Cursor reads to decide *when* to suggest the agent.
+
+**At a glance — how the two differ:**
+
+| | `event-detection-reviewer` | `data-layer-reviewer` |
+|---|---|---|
+| **Owns** | `app/detection/**`, `tests/test_detection.py` | `app/repository.py`, `app/models.py`, `app/db.py` |
+| **Question it answers** | "Is this event worth firing, and is the detector pure?" | "Is this query correct, and is it portable?" |
+| **Reviews for** | purity · cold-start · noise budget · justification · fire/no-fire tests · defensibility | dedup guarantee · SQLite↔Postgres portability · ordering/filtering · session hygiene · index sanity |
+| **Explicitly won't touch** | poller, API, Docker/CI, DB schema | detection logic, HTTP routing |
+| **Config** | `model: inherit`, `readonly: true` | `model: inherit`, `readonly: true` |
+
+#### 1. `event-detection-reviewer` — "is this event worth firing, and is it pure?"
+
+- **How it's built** → [`.cursor/agents/event-detection-reviewer.md`](.cursor/agents/event-detection-reviewer.md).
+  Its `description` tells Cursor to reach for it *"before merging any change under
+  `app/detection/`."* `readonly: true` keeps it advisory.
+- **The system prompt it runs under (what it's told):** it is *the event-detection
+  reviewer* whose sole job is logic under `app/detection/` and its tests. The
+  prompt pre-loads it with this project's real context — the **seven detectors
+  layered by signal type** (level, step, trajectory, state machine, categorical,
+  absolute tiers, relational), **why the robust modified z-score (median + MAD)**
+  is used instead of mean/std, the fact that **Vancouver's small MAD makes it
+  intentionally more sensitive than Ottawa**, the per-`(city, event_type, field)`
+  **cooldown**, and the `info`/`notable`/`severe` scale. It then runs a six-point
+  checklist: **purity** (no I/O, no wall-clock), **cold-start** handling, **noise
+  budget** (would this fire on ordinary hourly variation?), **justification
+  completeness**, **fire-AND-no-fire** test coverage, and one-sentence
+  **defensibility**.
+- **Purpose / boundary:** keep new or changed detection logic pure, selective,
+  and defensible. It will *not* comment on the poller, API, Docker/CI, or schema.
+- **Example prompts a reviewer can try:**
+  - *"Review my new `detect_freeze_risk` detector in rules.py for purity and noise budget."*
+  - *"Would lowering `anomaly_z` to 3.0 cause over-firing on Vancouver's calm baseline?"*
+  - *"Does my new detector have both a fires-on and a stays-silent test? Flag if not."*
+
+#### 2. `data-layer-reviewer` — "is this query correct and portable?"
+
+- **How it's built** → [`.cursor/agents/data-layer-reviewer.md`](.cursor/agents/data-layer-reviewer.md).
+  Its `description` scopes it to edits in `app/repository.py`, `app/models.py`,
+  and `app/db.py` — the only modules allowed to import SQLAlchemy.
+- **The system prompt it runs under (what it's told):** it is *the data-layer
+  reviewer*. Context it carries: the same ORM models run on **Postgres in
+  production and SQLite in tests** (so generic column types only — no
+  Postgres-specific SQL, or CI's database-less test job breaks), the
+  **two-mechanism dedup guarantee** (`UNIQUE(city, timestamp)` *plus* the
+  pre-insert lookup returning `(row, created)`), **injected sessions** (never a
+  module global), and **UTC** storage. Its checklist: dedup intactness, cross-DB
+  portability, correct **ordering/filtering** (most-recent-first on the right
+  column; filter applied *before* the limit), session hygiene, index sanity, and
+  the ORM⇄domain conversion boundary.
+- **Purpose / boundary:** catch data-access bugs — especially anything that works
+  on Postgres but silently breaks CI's SQLite tests, or that weakens dedup. It
+  does *not* review detection logic or routing.
+- **Example prompts a reviewer can try:**
+  - *"Does this new `get_events_by_field` query run on both SQLite and Postgres?"*
+  - *"Did my change to `store_reading` keep the `(row, created)` dedup contract?"*
+  - *"Is the most-recent-first ordering in `/events` using an indexed column?"*
 
 ### Skills — [`.cursor/skills/`](.cursor/skills/)
 
