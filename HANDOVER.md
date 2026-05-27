@@ -46,6 +46,11 @@ docker compose up --build         # API on http://localhost:8000
 curl http://localhost:8000/health # → {"status":"ok","readings_stored":...,"events_stored":...}
 ```
 
+The stack runs in Linux containers, so it behaves identically on macOS, Linux,
+and Windows — only the host commands differ (`cp` vs `copy`, `curl` vs
+`curl.exe`, venv activation). The per-OS command table is in
+[README ▸ Running on macOS, Linux, and Windows](README.md#running-on-macos-linux-and-windows).
+
 For the full guided walkthrough (seed sample data, run every skill, prove
 persistence, and a no-Docker venv path), see
 [README ▸ For reviewers — step-by-step](README.md#for-reviewers--step-by-step).
@@ -255,8 +260,9 @@ records what / where / when / why. Full rationale + reproducible tuning numbers:
 
 | Symptom | Cause / fix |
 |---|---|
-| `docker compose up` fails on a fresh clone | Run `cp .env.example .env` first — Compose needs `.env` for the DB credentials. |
-| `Cannot connect to the Docker daemon` | Docker Desktop isn't running — start it and retry. |
+| `docker compose up` fails on a fresh clone | Run `cp .env.example .env` first (Windows: `copy …` / `Copy-Item …`) — Compose needs `.env` for the DB credentials. |
+| `Cannot connect to the Docker daemon` | Docker Desktop isn't running (macOS/Windows), or `sudo systemctl start docker` (Linux); on Linux you may also need `sudo` or `docker`-group membership. |
+| `curl` behaves oddly on Windows | In PowerShell `curl` aliases `Invoke-WebRequest`. Use `curl.exe`, `Invoke-RestMethod`, or just open `/docs` in a browser. Quote URLs containing `&`. |
 | Port `8000` already in use | Another process owns it; change the `api` mapping in `docker-compose.yml`, e.g. `ports: ["8080:8000"]`. |
 | A skill run from the **host** can't reach the DB | The DB port isn't published by design. Run skills **inside the stack** (`docker compose exec api …`) or pass `--database-url`. |
 | `/events` is empty / sparse | Open-Meteo refreshes hourly, so live events accrue slowly. Seed the demo dataset (section 5) to see every event type immediately. |

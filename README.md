@@ -37,6 +37,7 @@ hard-coded thresholds.
 
 - [Quick links](#quick-links)
 - [For reviewers — step-by-step](#for-reviewers--step-by-step) ← start here
+- [Running on macOS, Linux, and Windows](#running-on-macos-linux-and-windows)
 - [Architecture](#architecture)
 - [Proof it runs](#proof-it-runs)
 - [Quick start](#quick-start)
@@ -176,6 +177,85 @@ above are for the everyday agent simply operating the stack and the skills.
    alternatives).
 4. **The Cursor environment (graded)** → [Cursor setup](#cursor-setup) — rules,
    the two scoped agents, and the skills.
+
+---
+
+## Running on macOS, Linux, and Windows
+
+**The whole stack runs inside Linux containers, so the application behaves
+identically on every host OS.** Only the commands you type on the *host* differ.
+Line endings are pinned to LF by [`.gitattributes`](.gitattributes) and the host
+virtualenv is excluded by [`.dockerignore`](.dockerignore), so a Windows checkout
+still produces correct Linux files in the image — nothing to configure there.
+
+### Prerequisites
+
+| OS | Docker | Notes |
+|---|---|---|
+| **macOS** (Intel **or** Apple Silicon) | Docker Desktop | Base images are multi-arch — they run **natively on M-series chips**, no emulation. |
+| **Linux** | Docker Engine + Compose plugin, *or* Docker Desktop | If your user isn't in the `docker` group, prefix commands with `sudo`. |
+| **Windows 10/11** | Docker Desktop (WSL 2 backend) | Use **PowerShell** for the commands below. |
+
+Plus **Git** on all three. After installing, confirm with `docker --version` and
+`docker compose version`.
+
+### The three setup commands, per shell
+
+**1 — Copy the env file**
+
+| Shell | Command |
+|---|---|
+| macOS / Linux (bash, zsh) | `cp .env.example .env` |
+| Windows PowerShell | `Copy-Item .env.example .env` |
+| Windows cmd.exe | `copy .env.example .env` |
+
+**2 — Build & start** (identical everywhere):
+
+```bash
+docker compose up --build
+```
+
+> Older Linux installs may only have the v1 binary `docker-compose` (hyphenated).
+> On Linux without Docker Desktop you may also need `sudo docker compose …`.
+
+**3 — Hit the API**
+
+| Shell | Command |
+|---|---|
+| macOS / Linux | `curl http://localhost:8000/health` |
+| Windows PowerShell | `curl.exe http://localhost:8000/health` — plain `curl` is an **alias for `Invoke-WebRequest`** with different syntax/output |
+| Any OS, no curl | open <http://localhost:8000/health> or <http://localhost:8000/docs> in a browser |
+
+When a URL contains `&` (e.g. `?city=Ottawa&limit=5`) wrap it in quotes —
+**required in PowerShell**, harmless elsewhere:
+`curl.exe "http://localhost:8000/readings?city=Ottawa&limit=5"`.
+
+### No-Docker path (Option B): activating the virtualenv
+
+| Shell | Activate |
+|---|---|
+| macOS / Linux | `source .venv/bin/activate` |
+| Windows PowerShell | `.venv\Scripts\Activate.ps1` |
+| Windows cmd.exe | `.venv\Scripts\activate.bat` |
+
+On macOS/Linux use `python3`/`pip3` if `python` still points at Python 2. If
+PowerShell blocks the activation script, run once in that session:
+`Set-ExecutionPolicy -Scope Process RemoteSigned`.
+
+### Other ways it can fail (any OS) — and the fix
+
+- **Port `8000` already in use** → change the `api` mapping in
+  `docker-compose.yml`, e.g. `ports: ["8080:8000"]`. (Postgres' `5432` is
+  deliberately **not** published, so it never clashes with a local database —
+  handy since many machines already run one.)
+- **Docker daemon not running** → start Docker Desktop (macOS/Windows) or
+  `sudo systemctl start docker` (Linux), then retry.
+- **Offline or behind a proxy** → live polling needs outbound HTTPS to
+  `api.open-meteo.com`; if it's blocked the poller logs a WARNING and keeps
+  running. The API, tests, and skills still work — seed the demo dataset (step 4
+  above) to populate data with no network.
+- **First build is slow** → it downloads the `python:3.13-slim` and
+  `postgres:17-alpine` base images once, then caches them.
 
 ---
 
