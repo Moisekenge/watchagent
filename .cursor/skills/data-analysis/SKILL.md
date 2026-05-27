@@ -12,16 +12,24 @@ inside Cursor.
 
 ## How to run
 
+**Simplest (always works) — inside the running stack**, which reaches the
+database over Compose's internal network with no host-port concerns:
+
+```bash
+docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py overview
+```
+
+**From the host** (needs the deps installed locally):
+
 ```bash
 python .cursor/skills/data-analysis/scripts/analyze.py <command> [options]
 ```
 
 The script resolves the database in this order: `--database-url`, then the
-`DATABASE_URL` environment variable, then a localhost default
-(`postgresql+psycopg2://watchagent:watchagent_local_dev@localhost:5432/watchagent`).
-When using the Docker stack from the host, Compose maps Postgres to
-`localhost:5432`, so the default works. You can also run it inside the stack:
-`docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py overview`.
+`DATABASE_URL` environment variable, then a `127.0.0.1:5432` default that matches
+the port Compose publishes. If you already run PostgreSQL locally on 5432 (so the
+container's port is shadowed), use the in-container form above or pass an explicit
+`--database-url`.
 
 ## Commands
 

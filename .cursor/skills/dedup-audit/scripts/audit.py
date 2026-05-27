@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 from app.db import make_engine  # noqa: E402
 from app.models import Reading  # noqa: E402
 
-DEFAULT_URL = "postgresql+psycopg2://watchagent:watchagent_local_dev@localhost:5432/watchagent"
+DEFAULT_URL = "postgresql+psycopg2://watchagent:watchagent_local_dev@127.0.0.1:5432/watchagent"
 
 
 def _session(url: str) -> Session:

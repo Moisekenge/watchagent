@@ -31,7 +31,7 @@ from app.detection.baselines import mad, median  # noqa: E402
 from app.models import Event, Reading  # noqa: E402
 from app.repository import latest_reading_per_city  # noqa: E402
 
-DEFAULT_URL = "postgresql+psycopg2://watchagent:watchagent_local_dev@localhost:5432/watchagent"
+DEFAULT_URL = "postgresql+psycopg2://watchagent:watchagent_local_dev@127.0.0.1:5432/watchagent"
 NUMERIC_FIELDS = ("temperature_2m", "apparent_temperature", "wind_speed_10m", "precipitation")
 
 

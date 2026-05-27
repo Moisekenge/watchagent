@@ -307,8 +307,10 @@ decision here:
 
 Executable scripts the Cursor agent can invoke as tools. Each is a `SKILL.md`
 plus a script under `scripts/`. They resolve the database from `--database-url`,
-then `$DATABASE_URL`, then a `localhost:5432` default, so they work from the host
-(Postgres is published) or in-container (`docker compose exec api python …`).
+then `$DATABASE_URL`, then a `127.0.0.1:5432` default. Run them **inside the
+stack** (always works, no host-port concerns) or from the host. If you already
+run PostgreSQL locally on 5432, prefer the in-container form so the container's
+published port isn't shadowed.
 
 | Skill | What it does |
 |-------|--------------|
@@ -319,13 +321,13 @@ then `$DATABASE_URL`, then a `localhost:5432` default, so they work from the hos
 Example:
 
 ```bash
-# From the host, with the stack running:
-python .cursor/skills/data-analysis/scripts/analyze.py overview
-python .cursor/skills/data-analysis/scripts/analyze.py compare --hours 24
-python .cursor/skills/data-analysis/scripts/analyze.py events --severity severe
-
-# Or inside the running stack:
+# Inside the running stack (recommended — no host-port concerns):
 docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py overview
+docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py compare --hours 24
+docker compose exec api python .cursor/skills/data-analysis/scripts/analyze.py events --severity severe
+
+# Or from the host (deps installed locally):
+python .cursor/skills/data-analysis/scripts/analyze.py overview
 ```
 
 ---
