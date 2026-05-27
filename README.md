@@ -1,5 +1,9 @@
 # WatchAgent — Weather Monitor & Notable-Event Detector
 
+[![CI](https://github.com/Moisekenge/watchagent/actions/workflows/ci.yml/badge.svg)](https://github.com/Moisekenge/watchagent/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 WatchAgent polls live weather for **Ottawa, Toronto, and Vancouver**, decides
 when something genuinely notable has happened, and exposes both the raw readings
 and the detected events over an HTTP API.
